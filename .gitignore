@@ -8,3 +8,8 @@
 *.zip
 data/
 pgdata/
+
+# local db dumps
+*.db
+encar_dump.db
+
