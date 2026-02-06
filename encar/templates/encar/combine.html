@@ -1,0 +1,1161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Encar 시장가 대시보드</title>
+
+    <!-- Tabulator -->
+    <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/tabulator-tables@6.2.5/dist/js/tabulator.min.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <style>
+        :root{
+            --bg:#0b1220;
+            --panel:#0f1a2e;
+            --card: rgba(255,255,255,.04);
+            --card2: rgba(255,255,255,.03);
+            --text:#e9eefb;
+            --muted:#9aa7bd;
+            --line:rgba(255,255,255,.09);
+            --line2:rgba(255,255,255,.14);
+            --accent:#5b8cff;
+            --accent2:#7c5cff;
+            --good:#22c55e;
+            --warn:#f59e0b;
+            --bad:#ef4444;
+            --shadow: 0 12px 30px rgba(0,0,0,.35);
+            --radius:18px;
+        }
+        *{ box-sizing:border-box; }
+        body{
+            margin:0;
+            color:var(--text);
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background:
+                    radial-gradient(1200px 600px at 15% -10%, rgba(91,140,255,.25), transparent 60%),
+                    radial-gradient(900px 500px at 90% 0%, rgba(124,92,255,.18), transparent 55%),
+                    var(--bg);
+        }
+        .app{ max-width: 1600px; margin: 0 auto; padding: 18px 18px 26px; }
+
+        /* top bar */
+        .top{
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            padding: 14px 0 10px;
+            backdrop-filter: blur(10px);
+            background: linear-gradient(180deg, rgba(11,18,32,.92), rgba(11,18,32,.55));
+            border-bottom: 1px solid rgba(255,255,255,.06);
+        }
+        .topRow{
+            display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+        }
+        .brand{
+            display:flex; flex-direction:column; gap:2px; margin-right:8px;
+        }
+        .brand h1{
+            margin:0;
+            font-size: 18px;
+            letter-spacing:-.2px;
+        }
+        .brand .sub{ font-size:12px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; }
+        .pill{
+            display:inline-flex; align-items:center;
+            padding:4px 10px;
+            border-radius:999px;
+            border:1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.04);
+            color:var(--muted);
+            font-size:12px;
+        }
+
+        .controls{
+            flex:1;
+            display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: var(--radius);
+            background: rgba(255,255,255,.03);
+            box-shadow: var(--shadow);
+        }
+        .input, .select{
+            background: rgba(255,255,255,.04);
+            border:1px solid rgba(255,255,255,.10);
+            color:var(--text);
+            padding: 10px 12px;
+            border-radius: 12px;
+            outline: none;
+        }
+        .input{ min-width: 280px; flex: 1; }
+        .select{ min-width: 110px; cursor:pointer; }
+        .toggle{
+            display:flex; align-items:center; gap:8px;
+            padding: 10px 12px;
+            border:1px solid rgba(255,255,255,.10);
+            border-radius: 12px;
+            background: rgba(255,255,255,.03);
+            color: var(--muted);
+            font-size: 12px;
+            user-select:none;
+        }
+        .toggle input{ width:16px; height:16px; }
+
+        .btn{
+            border:1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.05);
+            color: var(--text);
+            padding: 10px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: .15s ease;
+            display:inline-flex; gap:8px; align-items:center;
+            user-select:none;
+            white-space:nowrap;
+        }
+        .btn:hover{ transform: translateY(-1px); background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.16); }
+        .btn.primary{
+            border-color: rgba(91,140,255,.55);
+            background: linear-gradient(90deg, rgba(91,140,255,.25), rgba(124,92,255,.22));
+        }
+        .btn.ghost{
+            background: transparent;
+        }
+        .btn.danger{
+            border-color: rgba(239,68,68,.5);
+            background: rgba(239,68,68,.10);
+        }
+
+        .status{
+            display:flex; align-items:center; gap:8px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border:1px solid rgba(255,255,255,.08);
+            background: rgba(255,255,255,.03);
+            color: var(--muted);
+            font-size: 12px;
+            white-space:nowrap;
+        }
+        .dot{ width:8px; height:8px; border-radius:999px; background: var(--muted); }
+        .dot.ok{ background: var(--good); box-shadow: 0 0 0 6px rgba(34,197,94,.14); }
+        .dot.loading{ background: var(--warn); box-shadow: 0 0 0 6px rgba(245,158,11,.14); }
+        .dot.bad{ background: var(--bad); box-shadow: 0 0 0 6px rgba(239,68,68,.14); }
+
+        /* layout */
+        .grid{
+            margin-top: 14px;
+            display:grid;
+            grid-template-columns: 380px 1fr;
+            gap: 12px;
+            align-items:start;
+        }
+        @media (max-width: 1200px){
+            .grid{ grid-template-columns: 1fr; }
+        }
+
+        .card{
+            border:1px solid rgba(255,255,255,.08);
+            border-radius: var(--radius);
+            background: rgba(255,255,255,.03);
+            box-shadow: var(--shadow);
+            overflow:hidden;
+        }
+        .cardHead{
+            padding: 12px 14px;
+            border-bottom:1px solid rgba(255,255,255,.07);
+            display:flex; align-items:center; justify-content:space-between;
+            background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+        }
+        .cardHead strong{ font-size: 13px; color:#dbe6ff; }
+        .cardBody{ padding: 12px 14px; }
+
+        .kpis{
+            display:grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .kpi{
+            padding: 12px;
+            border:1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            background: rgba(255,255,255,.03);
+        }
+        .kpi .label{ color: var(--muted); font-size: 12px; }
+        .kpi .val{ margin-top: 6px; font-size: 18px; font-weight: 700; letter-spacing:-.2px; }
+        .kpi .hint{ margin-top: 6px; font-size: 11px; color: rgba(154,167,189,.85); }
+
+        .metricList{
+            display:grid;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .metric{
+            display:flex; justify-content:space-between; gap:10px;
+            padding: 10px 12px;
+            border:1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            background: rgba(255,255,255,.02);
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .metric b{ color: var(--text); font-weight: 700; }
+
+        .chartWrap{
+            height: 220px;
+            padding: 8px 4px 0;
+        }
+
+        /* table area */
+        .tableCard .cardBody{ padding: 0; }
+        #table{
+            width: 100%;
+            height: calc(75vh);
+            min-height: 520px;
+            border:none;
+        }
+
+        /* =========================
+           Tabulator — Glass Dark Theme (Override)
+           ========================= */
+        #table .tabulator{
+            background: transparent !important;
+            border:none !important;
+            border-radius: 16px !important;
+            overflow: hidden !important;
+            box-shadow: 0 18px 40px rgba(0,0,0,.35) !important;
+            background:#333;
+        }
+
+        /* Header */
+        #table .tabulator-header{
+            background: linear-gradient(180deg, rgba(18,28,48,.92), rgba(12,20,36,.92)) !important;
+            border-bottom: 1px solid rgba(255,255,255,.10) !important;
+        }
+
+        #table .tabulator-header .tabulator-col{
+            background: transparent !important;
+            border-right: 1px solid rgba(255,255,255,.06) !important;
+            color: rgba(231,240,255,.92) !important;
+            font-weight: 700 !important;
+            letter-spacing: -.2px;
+        }
+
+        #table .tabulator-header .tabulator-col:hover{
+            background: rgba(91,140,255,.08) !important;
+        }
+
+        #table .tabulator-col-title{
+            padding: 10px 10px !important;
+        }
+
+        #table .tabulator-arrow{
+            border-bottom-color: rgba(231,240,255,.55) !important;
+            border-top-color: rgba(231,240,255,.55) !important;
+            opacity: .9;
+        }
+
+        /* Body / Rows */
+        #table .tabulator-tableholder{
+            background: rgba(255,255,255,.02) !important;
+        }
+        .tabulator .tabulator-tableholder .tabulator-table{
+            background:#000;
+        }
+
+        #table .tabulator-row{
+            background: rgba(255,255,255,.015) !important;
+            color: rgba(233,238,251,.94) !important;
+            border-bottom: 1px solid rgba(255,255,255,.05) !important;
+            transition: background .12s ease, transform .12s ease;
+        }
+
+        #table .tabulator-row.tabulator-row-even{
+            background: rgba(255,255,255,.025) !important;
+        }
+
+        #table .tabulator-row:hover{
+            background: rgba(91,140,255,.12) !important;
+        }
+
+        #table .tabulator-row.tabulator-selected{
+            background: rgba(124,92,255,.18) !important;
+            box-shadow: inset 0 0 0 1px rgba(124,92,255,.35);
+        }
+
+        #table .tabulator-cell{
+            border-right: 1px solid rgba(255,255,255,.04) !important;
+            padding: 9px 10px !important;
+            line-height: 1.25 !important;
+            font-size: 12.5px !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #table .tabulator-cell:focus{
+            outline: none !important;
+        }
+
+        /* Frozen columns (왼쪽 고정) */
+        #table .tabulator-row .tabulator-cell.tabulator-frozen{
+            background: rgba(12,20,36,.70) !important;
+            box-shadow: 12px 0 18px rgba(0,0,0,.25);
+        }
+        #table .tabulator-header .tabulator-col.tabulator-frozen{
+            background: rgba(12,20,36,.92) !important;
+        }
+
+        /* Footer / Pagination */
+        #table .tabulator-footer{
+            background: linear-gradient(180deg, rgba(12,20,36,.80), rgba(12,20,36,.92)) !important;
+            border-top: 1px solid rgba(255,255,255,.10) !important;
+            color: rgba(154,167,189,.95) !important;
+        }
+
+        #table .tabulator-paginator{
+            padding: 10px 12px !important;
+        }
+
+        #table .tabulator-page{
+            border: 1px solid rgba(255,255,255,.10) !important;
+            background: rgba(255,255,255,.04) !important;
+            color: rgba(233,238,251,.92) !important;
+            border-radius: 999px !important;
+            padding: 6px 10px !important;
+            margin: 0 4px !important;
+        }
+
+        #table .tabulator-page:hover{
+            background: rgba(255,255,255,.08) !important;
+            border-color: rgba(255,255,255,.18) !important;
+        }
+
+        #table .tabulator-page.active{
+            border-color: rgba(91,140,255,.55) !important;
+            background: rgba(91,140,255,.18) !important;
+        }
+
+        /* Page size select */
+        #table select{
+            background: rgba(255,255,255,.04) !important;
+            border: 1px solid rgba(255,255,255,.10) !important;
+            color: rgba(233,238,251,.92) !important;
+            border-radius: 12px !important;
+            padding: 6px 10px !important;
+        }
+
+        /* Loading / Placeholder */
+        #table .tabulator-loader{
+            color: rgba(233,238,251,.92) !important;
+            background: rgba(12,20,36,.92) !important;
+            border: 1px solid rgba(255,255,255,.10) !important;
+            border-radius: 14px !important;
+        }
+
+        /* (옵션) 세로 구분선 너무 많으면 살짝 약하게 */
+        #table .tabulator-header .tabulator-col,
+        #table .tabulator-cell{
+            border-right-color: rgba(255,255,255,.03) !important;
+        }
+
+
+        .badge{
+            display:inline-flex; align-items:center; justify-content:center;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            border: 1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.03);
+            color: var(--muted);
+            white-space:nowrap;
+        }
+        .badge.good{ border-color: rgba(34,197,94,.45); color: #a7f3d0; background: rgba(34,197,94,.12); }
+        .badge.warn{ border-color: rgba(245,158,11,.45); color: #fde68a; background: rgba(245,158,11,.12); }
+        .badge.bad{ border-color: rgba(239,68,68,.45); color: #fecaca; background: rgba(239,68,68,.12); }
+
+        /* modal */
+        .modalBg{
+            position:fixed; inset:0;
+            background: rgba(0,0,0,.55);
+            display:none;
+            align-items:center; justify-content:center;
+            padding: 18px;
+            z-index: 999;
+        }
+        .modalBg.show{ display:flex; }
+        .modal{
+            width:min(980px, 100%);
+            background: rgba(15,26,46,.96);
+            border:1px solid rgba(255,255,255,.10);
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+            overflow:hidden;
+        }
+        .modalTop{
+            display:flex; align-items:center; justify-content:space-between;
+            padding: 12px 14px;
+            border-bottom:1px solid rgba(255,255,255,.08);
+        }
+        .modalTop strong{ font-size: 13px; }
+        .modalBody{
+            padding: 14px;
+            max-height: 70vh;
+            overflow:auto;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 12.5px;
+            color:#e6eeff;
+        }
+        .kbtn{
+            border:1px solid rgba(255,255,255,.10);
+            background: rgba(255,255,255,.06);
+            color: var(--text);
+            padding:8px 10px;
+            border-radius: 12px;
+            cursor:pointer;
+        }
+
+        /* Price Analysis Table */
+        .priceAnalysisTable{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .priceAnalysisTable th{
+            background: rgba(255,255,255,.08);
+            color: var(--text);
+            padding: 6px 4px;
+            border: 1px solid rgba(255,255,255,.10);
+            font-weight: 600;
+            text-align: center;
+            font-size: 10px;
+        }
+        .priceAnalysisTable td{
+            padding: 4px 3px;
+            border: 1px solid rgba(255,255,255,.06);
+            text-align: center;
+            color: var(--muted);
+        }
+        .priceAnalysisTable .year-col{
+            background: rgba(255,255,255,.04);
+            font-weight: 600;
+            color: var(--text);
+            width: 50px;
+        }
+        .priceAnalysisTable .price-cell{
+            color: var(--text);
+            font-weight: 500;
+        }
+        .priceAnalysisTable .no-data{
+            color: rgba(154,167,189,.5);
+        }
+    </style>
+</head>
+
+<body>
+<div class="top">
+    <div class="app">
+        <div class="topRow">
+            <div class="brand">
+                <h1>얼마에요??</h1>
+<!--                <div class="sub">-->
+<!--                    <span class="pill">/encar/api/combine/list</span>-->
+<!--                    <span class="pill">/encar/api/combine/export.xlsx</span>-->
+<!--                    <span class="pill">요약+분포+리스트</span>-->
+<!--                </div>-->
+            </div>
+
+            <div class="controls">
+                <input id="keyword" class="input" placeholder="검색 (예: GN7, K7, 기아, 227모, 차량번호...)" />
+                <select id="limit" class="select">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                    <option value="300">300</option>
+                </select>
+
+                <label class="toggle" title="0원/9999/평균±30% 가격을 제거해서 시장가를 더 현실적으로 봅니다.">
+                    <input id="rmOutlier" type="checkbox" checked />
+                    이상치 제거
+                </label>
+
+                <button class="btn primary" id="btnLoad">불러오기</button>
+                <button class="btn ghost" id="btnRefresh">새로고침</button>
+
+                <button class="btn" id="btnExcel">엑셀</button>
+                <button class="btn danger" id="btnReset">초기화</button>
+            </div>
+
+            <div class="status" id="status">
+                <span class="dot" id="dot"></span>
+                <span id="statusText">idle</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="app">
+    <div class="grid">
+        <!-- LEFT -->
+        <section class="card">
+            <div class="cardHead">
+                <strong>검색 요약</strong>
+                <span class="pill" id="metaPill">-</span>
+            </div>
+            <div class="cardBody">
+                <div class="kpis">
+                    <div class="kpi">
+                        <div class="label">총 매물</div>
+                        <div class="val" id="kpiTotal">-</div>
+                        <div class="hint">현재 조건 기준</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="label">표본(현재 페이지)</div>
+                        <div class="val" id="kpiSample">-</div>
+                        <div class="hint">요약/차트는 표본 기반</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="label">가격 범위</div>
+                        <div class="val" id="kpiRange">-</div>
+                        <div class="hint">이상치 제거 옵션 반영</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="label">평균가 · 중앙값</div>
+                        <div class="val" id="kpiAvgMed">-</div>
+                        <div class="hint">시장가 체감용</div>
+                    </div>
+                </div>
+
+                <div style="margin-top:12px;">
+                    <div class="pill" style="margin-bottom:8px;">가격 분포</div>
+                    <div class="chartWrap">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="metricList">
+                    <div class="metric"><span>사고율</span><b id="mAcc">-</b></div>
+                    <div class="metric"><span>단순수리율</span><b id="mSimple">-</b></div>
+                    <div class="metric"><span>주행거리 평균 · 중앙값</span><b id="mMileage">-</b></div>
+                </div>
+
+                <div style="margin-top:12px;">
+                    <div class="pill" style="margin-bottom:8px;">연식별 주행거리별 시세</div>
+                    <div id="priceAnalysisTable" style="max-height: 300px; overflow-y: auto; font-size: 11px;">
+                        <div style="color: var(--muted); text-align: center; padding: 20px;">
+                            데이터를 불러오는 중...
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top:10px; color: var(--muted); font-size: 11px; line-height:1.5;">
+                    * 빠르게 “시장가격 감” 보려고 만든 화면이라, 요약/차트는 <b>현재 페이지 표본 기반</b>이에요.<br/>
+                    * 전체 집계가 필요하면 API에 summary 전용 endpoint 추가하는게 정석.
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT -->
+        <section class="card tableCard">
+            <div class="cardHead">
+                <strong>매물 목록</strong>
+                <span class="pill" id="pagePill">-</span>
+            </div>
+            <div class="cardBody">
+                <div id="table"></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- Modal -->
+<div class="modalBg" id="modalBg">
+    <div class="modal">
+        <div class="modalTop">
+            <strong id="modalTitle">상세보기</strong>
+            <div style="display:flex; gap:8px;">
+                <button class="kbtn" id="btnCopy">복사</button>
+                <button class="kbtn" id="btnClose">닫기</button>
+            </div>
+        </div>
+        <div class="modalBody" id="modalBody"></div>
+    </div>
+</div>
+
+<script>
+    // ======================
+    // State
+    // ======================
+    // let offset = 0;
+    let lastLimit = 100;
+    let total = null;
+
+    let table = null;
+    let chart = null;
+
+    // 서버 key -> 화면 key (서버가 "사고이력(좀 쉽게)" 이런 키 쓰는 경우)
+    const SERVER_KEYS = {
+        accident: "사고이력",
+        insurance: "보험이력",
+        optStd: "옵션",
+        optPaid: "유상옵션",
+        optSum: "옵션 합계금액",
+        price: "판매가",
+        mileage: "주행거리",
+        accYN: "사고여부 Y/N",
+        simpleYN: "단순수리 Y/N",
+    };
+
+    function setStatus(type, text){
+        const dot = document.getElementById("dot");
+        dot.className = "dot" + (type ? " " + type : "");
+        document.getElementById("statusText").innerText = text;
+    }
+
+    function toNum(v){
+        if (v === null || v === undefined || v === "") return NaN;
+        const n = Number(String(v).replaceAll(",","").trim());
+        return Number.isFinite(n) ? n : NaN;
+    }
+    function fmtNum(v){
+        const n = toNum(v);
+        if (!Number.isFinite(n)) return (v ?? "");
+        return n.toLocaleString("ko-KR");
+    }
+
+    function median(arr){
+        if (!arr.length) return NaN;
+        const a = [...arr].sort((x,y)=>x-y);
+        const mid = Math.floor(a.length/2);
+        return (a.length%2) ? a[mid] : (a[mid-1]+a[mid])/2;
+    }
+
+    // 이상치 제거 규칙:
+    // - 0원 제거
+    // - 9999 제거(너가 말한 대표 이상치)
+    // - 평균 기준 ±30% 바깥 제거
+    function filterOutlierPrices(prices){
+        const base = prices.filter(p => Number.isFinite(p) && p > 0 && p !== 9999);
+        if (!base.length) return {filtered: [], mean: NaN};
+        const mean = base.reduce((a,b)=>a+b,0) / base.length;
+        const lo = mean * 0.7;
+        const hi = mean * 1.3;
+        const filtered = base.filter(p => p >= lo && p <= hi);
+        return {filtered, mean};
+    }
+
+    function openModal(title, text){
+        document.getElementById("modalTitle").innerText = title;
+        document.getElementById("modalBody").innerText = text ?? "";
+        document.getElementById("modalBg").classList.add("show");
+        window.__lastModalText = text ?? "";
+    }
+    function closeModal(){
+        document.getElementById("modalBg").classList.remove("show");
+    }
+    document.getElementById("btnClose").addEventListener("click", closeModal);
+    document.getElementById("modalBg").addEventListener("click", (e)=>{
+        if (e.target.id === "modalBg") closeModal();
+    });
+    document.getElementById("btnCopy").addEventListener("click", async ()=>{
+        try{
+            await navigator.clipboard.writeText(window.__lastModalText || "");
+            alert("복사 완료");
+        }catch(e){
+            alert("복사 실패(권한 확인)");
+        }
+    });
+
+    // ======================
+    // Table
+    // ======================
+    function badge(type, text){
+        const el = document.createElement("span");
+        el.className = `badge ${type}`;
+        el.textContent = text;
+        return el;
+    }
+
+    function buildTable(){
+        table = new Tabulator("#table", {
+            layout: "fitColumns",
+            height: "75vh",
+            selectable: 1,
+
+            pagination: true,
+            paginationMode: "remote",
+            paginationSize: 100,
+            paginationInitialPage: 1,
+            paginationSizeSelector: [50,100,200,300],
+
+            ajaxURL: "/encar/api/combine/list",
+            ajaxConfig: "GET",
+
+            // ✅ offset 제거 / page+size 사용
+            ajaxParams: function(){
+                const keyword = document.getElementById("keyword").value.trim();
+                const size = Number(document.getElementById("limit").value || 100);
+                lastLimit = size;
+
+                // 서버가 page/size 받으면 이대로
+                return { keyword, page: this.getPage(), size, withTotal: 1 };
+
+                // 서버가 limit/offset만 받으면 아래로 교체
+                // return { keyword, limit: size, offset: (this.getPage()-1)*size, withTotal: 1 };
+            },
+
+            // ✅ remote pagination 포맷으로 반환
+            ajaxResponse: (url, params, response) => {
+                if (!response || response.ok !== true){
+                    throw new Error(response?.error || "failed");
+                }
+
+                const rows = response.rows || response.data || [];
+                const meta = response.meta || {};
+                const totalCount = meta.total ?? null;
+
+                const size = Number(meta.size || meta.limit || params.size || lastLimit || 100);
+                const lastPage = meta.last_page || (totalCount ? Math.max(1, Math.ceil(totalCount / size)) : 1);
+
+                total = totalCount;
+
+                document.getElementById("metaPill").innerText = `total=${totalCount ?? "?"}`;
+                document.getElementById("pagePill").innerText = `page=${meta.page ?? params.page ?? "?"} · size=${size}`;
+
+                updateSummary(rows, meta);
+
+                return { data: rows, last_page: lastPage };
+            },
+
+            columns: [
+                {title:"차량번호", field:"차량번호", frozen:true, width:120},
+                {title:"제조사", field:"제조사", frozen:true, width:120},
+                {title:"세부모델", field:"세부모델", frozen:true, width:160},
+
+                {title:"트림", field:"트림", width:140},
+                {title:"연식", field:"연식", hozAlign:"center", width:80},
+                {title:"주행거리", field: SERVER_KEYS.mileage, hozAlign:"right", width:110, formatter:(cell)=>fmtNum(cell.getValue())},
+                {title:"판매가", field: SERVER_KEYS.price, hozAlign:"right", width:110, formatter:(cell)=>fmtNum(cell.getValue())},
+
+                {title:"단순수리", field: SERVER_KEYS.simpleYN, hozAlign:"center", width:110,
+                    formatter:(cell)=> cell.getValue()==="Y" ? badge("warn","단순수리") : badge("good","정상")
+                },
+                {title:"사고", field: SERVER_KEYS.accYN, hozAlign:"center", width:90,
+                    formatter:(cell)=> cell.getValue()==="Y" ? badge("bad","사고") : badge("good","무사고")
+                },
+
+                {title:"사고이력", field: SERVER_KEYS.accident, width:240,
+                    formatter:(cell)=>{
+                        const v = String(cell.getValue() ?? "");
+                        if (!v) return "-";
+                        const short = v.length > 40 ? v.slice(0,40)+"…" : v;
+                        const el = document.createElement("span");
+                        el.style.textDecoration = "underline dotted";
+                        el.style.cursor = "pointer";
+                        el.dataset.open = "사고이력";
+                        el.textContent = short;
+                        return el;
+                    }
+                },
+                {title:"보험이력", field: SERVER_KEYS.insurance, width:240,
+                    formatter:(cell)=>{
+                        const v = String(cell.getValue() ?? "");
+                        if (!v) return "-";
+                        const short = v.length > 40 ? v.slice(0,40)+"…" : v;
+                        const el = document.createElement("span");
+                        el.style.textDecoration = "underline dotted";
+                        el.style.cursor = "pointer";
+                        el.dataset.open = "보험이력";
+                        el.textContent = short;
+                        return el;
+                    }
+                },
+                {title:"옵션", field: SERVER_KEYS.optStd, width:240,
+                    formatter:(cell)=>{
+                        const v = String(cell.getValue() ?? "");
+                        if (!v) return "-";
+                        const short = v.length > 40 ? v.slice(0,40)+"…" : v;
+                        const el = document.createElement("span");
+                        el.style.textDecoration = "underline dotted";
+                        el.style.cursor = "pointer";
+                        el.dataset.open = "옵션";
+                        el.textContent = short;
+                        return el;
+                    }
+                },
+                {title:"유상옵션", field: SERVER_KEYS.optPaid, width:260,
+                    formatter:(cell)=>{
+                        const v = String(cell.getValue() ?? "");
+                        if (!v) return "-";
+                        const short = v.length > 45 ? v.slice(0,45)+"…" : v;
+                        const el = document.createElement("span");
+                        el.style.textDecoration = "underline dotted";
+                        el.style.cursor = "pointer";
+                        el.dataset.open = "유상옵션";
+                        el.textContent = short;
+                        return el;
+                    }
+                },
+
+                {title:"옵션합계", field: SERVER_KEYS.optSum, hozAlign:"right", width:120, formatter:(cell)=>fmtNum(cell.getValue())},
+            ],
+
+            rowClick: (e, row) => {
+                const t = e.target?.dataset?.open;
+                if (!t) return;
+                const data = row.getData();
+                if (t==="사고이력") openModal(t, data[SERVER_KEYS.accident] ?? "");
+                if (t==="보험이력") openModal(t, data[SERVER_KEYS.insurance] ?? "");
+                if (t==="옵션") openModal(t, data[SERVER_KEYS.optStd] ?? "");
+                if (t==="유상옵션") openModal(t, data[SERVER_KEYS.optPaid] ?? "");
+            },
+        });
+    }
+
+    // ======================
+    // Summary + Chart
+    // ======================
+    function updateSummary(rows, meta){
+        const rm = document.getElementById("rmOutlier").checked;
+
+        // price & mileage arrays (page sample)
+        const pricesAll = rows.map(r => toNum(r[SERVER_KEYS.price])).filter(Number.isFinite);
+        const mileAll   = rows.map(r => toNum(r[SERVER_KEYS.mileage])).filter(Number.isFinite);
+
+        let prices = pricesAll;
+        if (rm){
+            prices = filterOutlierPrices(pricesAll).filtered;
+        }
+
+        const totalStr = (meta?.total ?? meta?.count ?? rows.length ?? "-");
+        document.getElementById("kpiTotal").innerText = `${Number(totalStr).toLocaleString("ko-KR")}건`;
+        document.getElementById("kpiSample").innerText = `${rows.length.toLocaleString("ko-KR")}건`;
+
+        // range/avg/median
+        const minP = prices.length ? Math.min(...prices) : NaN;
+        const maxP = prices.length ? Math.max(...prices) : NaN;
+        const avgP = prices.length ? (prices.reduce((a,b)=>a+b,0)/prices.length) : NaN;
+        const medP = median(prices);
+
+        document.getElementById("kpiRange").innerText =
+            (Number.isFinite(minP) && Number.isFinite(maxP)) ? `${fmtNum(minP)} ~ ${fmtNum(maxP)}` : "-";
+        document.getElementById("kpiAvgMed").innerText =
+            (Number.isFinite(avgP) && Number.isFinite(medP)) ? `${fmtNum(avgP)} · ${fmtNum(medP)}` : "-";
+
+        // rates
+        const accCnt = rows.filter(r => r[SERVER_KEYS.accYN] === "Y").length;
+        const simCnt = rows.filter(r => r[SERVER_KEYS.simpleYN] === "Y").length;
+
+        document.getElementById("mAcc").innerText = rows.length ? `${Math.round(accCnt/rows.length*100)}%` : "-";
+        document.getElementById("mSimple").innerText = rows.length ? `${Math.round(simCnt/rows.length*100)}%` : "-";
+
+        const avgM = mileAll.length ? (mileAll.reduce((a,b)=>a+b,0)/mileAll.length) : NaN;
+        const medM = median(mileAll);
+        document.getElementById("mMileage").innerText =
+            (Number.isFinite(avgM) && Number.isFinite(medM)) ? `${fmtNum(avgM)} · ${fmtNum(medM)}` : "-";
+
+        // chart scatter plot with individual listings
+        renderPriceChart(rows, rm);
+
+        // 새로운 가격 분석 업데이트
+        updatePriceAnalysis();
+    }
+
+    function renderPriceChart(rows, removeOutliers){
+        const canvas = document.getElementById("priceChart");
+        const ctx = canvas.getContext("2d");
+
+        if (!rows || rows.length === 0){
+            if (chart){ chart.destroy(); chart = null; }
+            return;
+        }
+
+        // Prepare data points with car info
+        let dataPoints = [];
+        const allPrices = [];
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const price = toNum(row[SERVER_KEYS.price]);
+            const carNo = row["차량번호"] || `매물${i+1}`;
+            const mileage = toNum(row[SERVER_KEYS.mileage]);
+
+            if (Number.isFinite(price) && price > 0) {
+                allPrices.push(price);
+                dataPoints.push({
+                    x: i, // x-axis will be listing index
+                    y: price,
+                    carNo: carNo,
+                    price: price,
+                    mileage: mileage,
+                    rowIndex: i
+                });
+            }
+        }
+
+        // Apply outlier filtering if enabled
+        if (removeOutliers && allPrices.length > 0) {
+            const {filtered} = filterOutlierPrices(allPrices);
+            const filteredPriceSet = new Set(filtered);
+            dataPoints = dataPoints.filter(point => filteredPriceSet.has(point.price));
+        }
+
+        if (dataPoints.length === 0) {
+            if (chart){ chart.destroy(); chart = null; }
+            return;
+        }
+
+        // Sort by price for better curve visualization
+        dataPoints.sort((a, b) => a.price - b.price);
+        // Reassign x coordinates after sorting
+        dataPoints.forEach((point, index) => {
+            point.x = index;
+        });
+
+        if (chart) chart.destroy();
+        chart = new Chart(ctx, {
+            type: "line",
+            data: {
+                datasets: [{
+                    label: "매물 가격",
+                    data: dataPoints,
+                    borderColor: "rgba(91,140,255,0.8)",
+                    backgroundColor: "rgba(91,140,255,0.6)",
+                    pointBackgroundColor: "rgba(91,140,255,0.9)",
+                    pointBorderColor: "rgba(255,255,255,0.8)",
+                    pointBorderWidth: 2,
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    fill: false,
+                    tension: 0.4,
+                    showLine: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    intersect: false,
+                    mode: 'point'
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: true,
+                        callbacks: {
+                            title: function(context) {
+                                const point = context[0].raw;
+                                return `차량번호: ${point.carNo}`;
+                            },
+                            label: function(context) {
+                                const point = context.raw;
+                                const lines = [`가격: ${fmtNum(point.price)}원`];
+                                if (Number.isFinite(point.mileage)) {
+                                    lines.push(`주행거리: ${fmtNum(point.mileage)}km`);
+                                }
+                                return lines;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { 
+                        display: false // Hide x-axis as it's just index
+                    },
+                    y: { 
+                        ticks: { 
+                            color: "#9aa7bd",
+                            callback: function(value) {
+                                return fmtNum(value) + '원';
+                            }
+                        }, 
+                        grid: { color: "rgba(255,255,255,.06)" },
+                        title: {
+                            display: true,
+                            text: '가격 (원)',
+                            color: "#9aa7bd"
+                        }
+                    }
+                },
+                onClick: function(event, elements) {
+                    if (elements.length > 0) {
+                        const element = elements[0];
+                        const dataPoint = dataPoints[element.index];
+
+                        // Find and select the corresponding row in the table
+                        const tableRows = table.getRows();
+                        for (let tableRow of tableRows) {
+                            const rowData = tableRow.getData();
+                            if (rowData["차량번호"] === dataPoint.carNo) {
+                                // Deselect all rows first
+                                table.deselectRow();
+                                // Select the matching row
+                                tableRow.select();
+                                // Scroll to the row
+                                tableRow.scrollTo();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ======================
+    // Load + Actions
+    // ======================
+    let __loading = false;
+
+    // 가격 분석 데이터 로드
+    async function loadPriceAnalysis() {
+        try {
+            const keyword = document.getElementById("keyword").value.trim();
+            const params = new URLSearchParams();
+            if (keyword) params.set("keyword", keyword);
+            params.set("sample", "5000"); // 샘플 크기 제한
+
+            const response = await fetch(`/encar/api/combine/price-analysis?${params.toString()}`);
+            const data = await response.json();
+
+            if (data.ok) {
+                return data;
+            } else {
+                console.error("Price analysis API error:", data.error);
+                return null;
+            }
+        } catch (e) {
+            console.error("Failed to load price analysis:", e);
+            return null;
+        }
+    }
+
+    // 가격 분석 테이블 업데이트
+    async function updatePriceAnalysis() {
+        const container = document.getElementById("priceAnalysisTable");
+        container.innerHTML = '<div style="color: var(--muted); text-align: center; padding: 20px;">데이터를 불러오는 중...</div>';
+
+        const data = await loadPriceAnalysis();
+        if (!data || !data.analysis || data.analysis.length === 0) {
+            container.innerHTML = '<div style="color: var(--muted); text-align: center; padding: 20px;">분석할 데이터가 없습니다.</div>';
+            return;
+        }
+
+        // 테이블 생성
+        let html = '<table class="priceAnalysisTable">';
+
+        // 헤더
+        html += '<thead><tr><th>연식</th>';
+        for (const range of data.mileage_ranges) {
+            html += `<th>${range}</th>`;
+        }
+        html += '</tr></thead>';
+
+        // 데이터 행
+        html += '<tbody>';
+        for (const yearData of data.analysis) {
+            if (yearData.mileage_ranges.some(r => r.count > 0)) { // 데이터가 있는 연식만 표시
+                html += `<tr><td class="year-col">${yearData.year}</td>`;
+
+                for (const rangeData of yearData.mileage_ranges) {
+                    if (rangeData.count > 0) {
+                        // 가격이 1만원 이상이면 만원 단위로, 그 이하면 천원 단위로 표시
+                        let displayPrice, unit;
+                        if (rangeData.avg_price >= 10000) {
+                            displayPrice = rangeData.avg_price;
+                            unit = "";
+                        } else {
+                            displayPrice = rangeData.avg_price;
+                            unit = "";
+                        }
+                        html += `<td class="price-cell" title="평균: ${fmtNum(rangeData.avg_price)}\n최소: ${fmtNum(rangeData.min_price)}\n최대: ${fmtNum(rangeData.max_price)}\n매물수: ${rangeData.count}">${displayPrice}${unit}</td>`;
+                    } else {
+                        html += '<td class="no-data">-</td>';
+                    }
+                }
+                html += '</tr>';
+            }
+        }
+        html += '</tbody></table>';
+
+        // 범례 추가
+        html += '<div style="margin-top: 8px; font-size: 10px; color: var(--muted); text-align: center;">';
+        html += '단위: 만원 (평균가격) | 셀에 마우스를 올리면 상세정보 표시';
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    async function load(resetPage=true){
+        if (__loading) return;
+        __loading = true;
+
+        try{
+            setStatus("loading","loading");
+
+            const limit = Number(document.getElementById("limit").value || 100);
+
+            // 1) page size가 바뀐 경우에만 setPageSize (이게 이미 ajax를 부를 수 있음)
+            if (table.getPageSize() !== limit){
+                table.setPageSize(limit);
+            }
+
+            // 2) resetPage면 1페이지로 이동 (이것도 ajax를 부를 수 있음)
+            if (resetPage){
+                table.setPage(1);
+                // setPage가 이미 데이터를 불러오면 여기서 끝
+            } else {
+                // 3) 같은 페이지에서 "새로고침"만 하고 싶을 때만 replaceData
+                await table.replaceData();
+            }
+
+            setStatus("ok","ok");
+        }catch(e){
+            console.error(e);
+            setStatus("bad","failed");
+            document.getElementById("metaPill").innerText = "요약 실패";
+        }finally{
+            __loading = false;
+        }
+    }
+
+    document.getElementById("btnLoad").addEventListener("click", ()=>load(true));   // 새검색: 1페이지로
+    document.getElementById("btnRefresh").addEventListener("click", ()=>load(false)); // 새로고침: 현재페이지 유지
+    document.getElementById("rmOutlier").addEventListener("change", ()=> {
+        // 현재 테이블 데이터 기준으로만 즉시 반영
+        updateSummary(table.getData() || [], { total: total });
+    });
+
+    document.getElementById("keyword").addEventListener("keydown", (e)=>{
+        if (e.key === "Enter") load(true);
+    });
+
+    document.getElementById("btnExcel").addEventListener("click", ()=>{
+        const keyword = document.getElementById("keyword").value.trim();
+        const limit = document.getElementById("limit").value;
+        const qs = new URLSearchParams();
+        qs.set("limit", limit);
+        if(keyword) qs.set("keyword", keyword);
+        window.location.href = `/encar/api/combine/export.xlsx?${qs.toString()}`;
+    });
+
+    document.getElementById("btnReset").addEventListener("click", ()=>{
+        document.getElementById("keyword").value = "";
+        document.getElementById("limit").value = "100";
+        document.getElementById("rmOutlier").checked = true;
+        offset = 0;
+        load(true);
+    });
+
+    // init
+    buildTable();
+    setStatus("", "idle");
+    load(true);
+</script>
+</body>
+</html>
