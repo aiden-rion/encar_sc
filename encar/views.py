@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -67,6 +68,45 @@ OPTION_CODE_MAP: Dict[str, str] = {
 # =========================================================
 # 유틸
 # =========================================================
+
+def split_keyword_tokens(keyword: str) -> List[str]:
+    # 따옴표로 묶인 문장은 하나로 취급하고 싶으면 확장 가능
+    tokens = re.split(r"\s+", keyword.strip())
+    return [t for t in tokens if t]
+
+def is_numeric_token(t: str) -> bool:
+    # 5.0 / 3.3 / 3800 등
+    return bool(re.fullmatch(r"\d+(\.\d+)?", t))
+
+def row_matches_tokens(vraw: Dict[str, Any], tokens: List[str]) -> bool:
+    """
+    2차 정밀 필터:
+    - 문자열 토큰은 제조사/모델/트림/세부트림/차량번호에서 AND 매칭
+    - 숫자 토큰은 트림/세부트림/모델명 위주로 AND 매칭(옵션/이력에서 매칭 방지)
+    """
+    maker = str(safe_get(vraw, ["category", "manufacturerName"]) or "").lower()
+    model = str(safe_get(vraw, ["category", "modelName"]) or "").lower()
+    trim  = str(safe_get(vraw, ["category", "gradeName"]) or "").lower()
+    subtrim = str(safe_get(vraw, ["category", "gradeDetailName"]) or "").lower()
+    carno = str(safe_get(vraw, ["vehicleNo"]) or "").lower()
+
+    # 넓은 텍스트(문자 토큰은 여기도 허용)
+    broad_text = " ".join([maker, model, trim, subtrim, carno])
+
+    # 숫자 토큰은 여기만 보자(잡매칭 방지)
+    numeric_text = " ".join([model, trim, subtrim])
+
+    for t in tokens:
+        tt = t.lower()
+        if is_numeric_token(tt):
+            if tt not in numeric_text:
+                return False
+        else:
+            if tt not in broad_text:
+                return False
+    return True
+
+
 def yn(v: Any) -> str:
     return "Y" if bool(v) else "N"
 
@@ -690,38 +730,66 @@ def combine_page(request: HttpRequest):
 
 def combine_list_api(request: HttpRequest):
     """
-    /encar/api/combine/list?limit=100&offset=0&keyword=K7&withTotal=1
-    - SQLite + Django: 플레이스홀더는 반드시 %s 사용
+    /encar/api/combine/list?keyword=G90 5.0&page=1&size=100&withTotal=1
+    - page/size 지원(프론트 Tabulator remote pagination 대응)
+    - keyword 토큰 AND 검색 + 2차 정밀필터로 잡매칭 감소
     """
     try:
-        limit = int(request.GET.get("limit", "100"))
-        offset = int(request.GET.get("offset", "0"))
         keyword = (request.GET.get("keyword") or "").strip()
         with_total = (request.GET.get("withTotal") or "0") == "1"
 
-        limit = max(1, min(limit, 500))
-        offset = max(0, offset)
+        # ✅ page/size 우선 지원 (없으면 limit/offset fallback)
+        page = request.GET.get("page")
+        size = request.GET.get("size")
+
+        if page is not None or size is not None:
+            page = int(page or "1")
+            size = int(size or "100")
+            page = max(1, page)
+            size = max(1, min(size, 500))
+            limit = size
+            offset = (page - 1) * size
+        else:
+            limit = int(request.GET.get("limit", "100"))
+            offset = int(request.GET.get("offset", "0"))
+            limit = max(1, min(limit, 500))
+            offset = max(0, offset)
+            page = (offset // limit) + 1
+            size = limit
+
+        tokens = split_keyword_tokens(keyword) if keyword else []
 
         where_sql = ""
         params: List[Any] = []
 
-        # ✅ payload LIKE (latest 테이블 payload는 TEXT이므로 가능)
-        if keyword:
-            where_sql = " WHERE v.payload LIKE %s "
-            params.append(f"%{keyword}%")
+        # ✅ 1차 후보군: payload LIKE를 토큰 AND로
+        # (tokens가 2개 이상이면 정확도 확 올라감)
+        if tokens:
+            conds = []
+            for t in tokens:
+                conds.append("v.payload LIKE %s")
+                params.append(f"%{t}%")
+            where_sql = " WHERE " + " AND ".join(conds)
 
+        # ✅ SQL 실행
         sql = JOIN_LATEST_BASE + where_sql + " ORDER BY v.car_id LIMIT %s OFFSET %s"
-        params.extend([limit, offset])
+        params_sql = params + [limit, offset]
 
         conn = connections[DB_ALIAS]
         rows: List[Dict[str, Any]] = []
 
         with conn.cursor() as cur:
-            cur.execute(sql, params)
-            for car_id, v_payload, i_payload, r_payload, o_payload in cur.fetchall():
+            cur.execute(sql, params_sql)
+            fetched = cur.fetchall()
+
+            for car_id, v_payload, i_payload, r_payload, o_payload in fetched:
                 vraw = parse_json_maybe(v_payload) or {}
                 if not isinstance(vraw, dict):
-                    vraw = {"_payload": vraw}
+                    continue
+
+                # ✅ 2차 정밀 필터: 숫자 토큰 잡매칭 방지
+                if tokens and (not row_matches_tokens(vraw, tokens)):
+                    continue
 
                 iraw = parse_json_maybe(i_payload) if i_payload else None
                 iraw = iraw if isinstance(iraw, dict) else None
@@ -738,11 +806,16 @@ def combine_list_api(request: HttpRequest):
                 rows.append(row)
 
         total = None
+        last_page = None
         if with_total:
-            cnt_sql = "SELECT COUNT(*) FROM vehicle_raw_latest v" + (where_sql if keyword else "")
+            # total은 1차(where_sql) 기준으로 세되, 2차 필터가 있으면 정확 total은 어려움.
+            # 현실적으로는 1차 total을 쓰고, 2차 필터는 "표본 정확도"로 보자.
+            cnt_sql = "SELECT COUNT(*) FROM vehicle_raw_latest v" + (where_sql if tokens else "")
             with conn.cursor() as cur:
-                cur.execute(cnt_sql, ([f"%{keyword}%"] if keyword else []))
+                cur.execute(cnt_sql, params)
                 total = int(cur.fetchone()[0])
+
+            last_page = max(1, (total + size - 1) // size) if total is not None else None
 
         return JsonResponse(
             {
@@ -750,10 +823,14 @@ def combine_list_api(request: HttpRequest):
                 "meta": {
                     "db_alias": DB_ALIAS,
                     "count": len(rows),
+                    "page": page,
+                    "size": size,
                     "limit": limit,
                     "offset": offset,
                     "keyword": keyword,
+                    "tokens": tokens,
                     "total": total,
+                    "last_page": last_page,
                 },
                 "rows": rows,
             },

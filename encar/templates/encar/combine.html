@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="ko">
 <head>
@@ -11,8 +12,9 @@
 
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
+    <link href="https://unpkg.com/tabulator-tables@6.2.5/dist/css/tabulator.min.css" rel="stylesheet">
     <style>
+
         :root{
             --bg:#0b1220;
             --panel:#0f1a2e;
@@ -463,11 +465,6 @@
         <div class="topRow">
             <div class="brand">
                 <h1>얼마에요??</h1>
-<!--                <div class="sub">-->
-<!--                    <span class="pill">/encar/api/combine/list</span>-->
-<!--                    <span class="pill">/encar/api/combine/export.xlsx</span>-->
-<!--                    <span class="pill">요약+분포+리스트</span>-->
-<!--                </div>-->
             </div>
 
             <div class="controls">
@@ -533,9 +530,7 @@
 
                 <div style="margin-top:12px;">
                     <div class="pill" style="margin-bottom:8px;">가격 분포</div>
-                    <div class="chartWrap">
-                        <canvas id="priceChart"></canvas>
-                    </div>
+                    <div class="chartWrap"><canvas id="priceChart"></canvas></div>
                 </div>
 
                 <div class="metricList">
@@ -547,9 +542,7 @@
                 <div style="margin-top:12px;">
                     <div class="pill" style="margin-bottom:8px;">연식별 주행거리별 시세</div>
                     <div id="priceAnalysisTable" style="max-height: 300px; overflow-y: auto; font-size: 11px;">
-                        <div style="color: var(--muted); text-align: center; padding: 20px;">
-                            데이터를 불러오는 중...
-                        </div>
+                        <div style="color: var(--muted); text-align: center; padding: 20px;">데이터를 불러오는 중...</div>
                     </div>
                 </div>
 
@@ -566,9 +559,7 @@
                 <strong>매물 목록</strong>
                 <span class="pill" id="pagePill">-</span>
             </div>
-            <div class="cardBody">
-                <div id="table"></div>
-            </div>
+            <div class="cardBody"><div id="table"></div></div>
         </section>
     </div>
 </div>
@@ -588,17 +579,16 @@
 </div>
 
 <script>
-    // ======================
-    // State
-    // ======================
-    // let offset = 0;
+    /* =========================================================
+       State
+    ========================================================= */
     let lastLimit = 100;
     let total = null;
 
     let table = null;
     let chart = null;
 
-    // 서버 key -> 화면 key (서버가 "사고이력(좀 쉽게)" 이런 키 쓰는 경우)
+    // 서버 key -> 화면 key
     const SERVER_KEYS = {
         accident: "사고이력",
         insurance: "보험이력",
@@ -627,7 +617,6 @@
         if (!Number.isFinite(n)) return (v ?? "");
         return n.toLocaleString("ko-KR");
     }
-
     function median(arr){
         if (!arr.length) return NaN;
         const a = [...arr].sort((x,y)=>x-y);
@@ -635,10 +624,9 @@
         return (a.length%2) ? a[mid] : (a[mid-1]+a[mid])/2;
     }
 
-    // 이상치 제거 규칙:
-    // - 0원 제거
-    // - 9999 제거(너가 말한 대표 이상치)
-    // - 평균 기준 ±30% 바깥 제거
+    /* =========================================================
+       Outlier filter (만원 단위 기준)
+    ========================================================= */
     function filterOutlierPrices(prices){
         const base = prices.filter(p => Number.isFinite(p) && p > 0 && p !== 9999);
         if (!base.length) return {filtered: [], mean: NaN};
@@ -649,6 +637,9 @@
         return {filtered, mean};
     }
 
+    /* =========================================================
+       Modal
+    ========================================================= */
     function openModal(title, text){
         document.getElementById("modalTitle").innerText = title;
         document.getElementById("modalBody").innerText = text ?? "";
@@ -671,9 +662,9 @@
         }
     });
 
-    // ======================
-    // Table
-    // ======================
+    /* =========================================================
+       Tabulator
+    ========================================================= */
     function badge(type, text){
         const el = document.createElement("span");
         el.className = `badge ${type}`;
@@ -696,20 +687,13 @@
             ajaxURL: "/encar/api/combine/list",
             ajaxConfig: "GET",
 
-            // ✅ offset 제거 / page+size 사용
             ajaxParams: function(){
                 const keyword = document.getElementById("keyword").value.trim();
                 const size = Number(document.getElementById("limit").value || 100);
                 lastLimit = size;
-
-                // 서버가 page/size 받으면 이대로
                 return { keyword, page: this.getPage(), size, withTotal: 1 };
-
-                // 서버가 limit/offset만 받으면 아래로 교체
-                // return { keyword, limit: size, offset: (this.getPage()-1)*size, withTotal: 1 };
             },
 
-            // ✅ remote pagination 포맷으로 반환
             ajaxResponse: (url, params, response) => {
                 if (!response || response.ok !== true){
                     throw new Error(response?.error || "failed");
@@ -817,14 +801,72 @@
         });
     }
 
-    // ======================
-    // Summary + Chart
-    // ======================
+    /* =========================================================
+       Summary + Chart (Raincloud style)
+    ========================================================= */
+    function normalizePriceToManwon(raw){
+        const p = toNum(raw);
+        if (!Number.isFinite(p)) return NaN;
+        // 원 단위(>100000)면 만원으로 변환, 이미 만원이면 그대로
+        return (p > 100000) ? Math.round(p / 10000) : p;
+    }
+
+    function mean(arr){
+        if(!arr.length) return NaN;
+        return arr.reduce((a,b)=>a+b,0) / arr.length;
+    }
+    function std(arr){
+        if(arr.length < 2) return 0;
+        const m = mean(arr);
+        const v = arr.reduce((s,x)=> s + (x-m)*(x-m), 0) / arr.length;
+        return Math.sqrt(v);
+    }
+
+    // KDE: y=가격(만원), x=밀도
+    function calculateKDE_Manwon(pricesManwon, bandwidth){
+        if(!pricesManwon.length) return [];
+        const min = Math.min(...pricesManwon);
+        const max = Math.max(...pricesManwon);
+        const range = Math.max(1, max - min);
+
+        const nPts = 180;
+        const step = range / (nPts - 1);
+
+        const invSqrt2Pi = 1 / Math.sqrt(2 * Math.PI);
+        const points = [];
+
+        for(let i=0;i<nPts;i++){
+            const x = min + i*step; // ✅ x축=가격(만원)
+            let d = 0;
+            for(const v of pricesManwon){
+                const u = (x - v) / bandwidth;
+                d += Math.exp(-0.5*u*u) * invSqrt2Pi;
+            }
+            d = d / (pricesManwon.length * bandwidth);
+            points.push({ x, y: d }); // ✅ y=밀도
+        }
+        return points;
+    }
+
+    // kdePoints(y 오름차순)에서 y에 대한 density 선형보간
+    function densityAtY(kdePoints, y){
+        if(!kdePoints?.length) return 0;
+        let lo = 0, hi = kdePoints.length - 1;
+        while (lo <= hi){
+            const mid = (lo + hi) >> 1;
+            if (kdePoints[mid].y < y) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        const i = Math.max(1, Math.min(kdePoints.length - 1, lo));
+        const a = kdePoints[i-1], b = kdePoints[i];
+        const t = (y - a.y) / (b.y - a.y || 1);
+        return a.x + (b.x - a.x) * t;
+    }
+
     function updateSummary(rows, meta){
         const rm = document.getElementById("rmOutlier").checked;
 
-        // price & mileage arrays (page sample)
-        const pricesAll = rows.map(r => toNum(r[SERVER_KEYS.price])).filter(Number.isFinite);
+        const pricesAll = rows.map(r => normalizePriceToManwon(r[SERVER_KEYS.price])).filter(Number.isFinite);
         const mileAll   = rows.map(r => toNum(r[SERVER_KEYS.mileage])).filter(Number.isFinite);
 
         let prices = pricesAll;
@@ -836,7 +878,6 @@
         document.getElementById("kpiTotal").innerText = `${Number(totalStr).toLocaleString("ko-KR")}건`;
         document.getElementById("kpiSample").innerText = `${rows.length.toLocaleString("ko-KR")}건`;
 
-        // range/avg/median
         const minP = prices.length ? Math.min(...prices) : NaN;
         const maxP = prices.length ? Math.max(...prices) : NaN;
         const avgP = prices.length ? (prices.reduce((a,b)=>a+b,0)/prices.length) : NaN;
@@ -845,9 +886,8 @@
         document.getElementById("kpiRange").innerText =
             (Number.isFinite(minP) && Number.isFinite(maxP)) ? `${fmtNum(minP)} ~ ${fmtNum(maxP)}` : "-";
         document.getElementById("kpiAvgMed").innerText =
-            (Number.isFinite(avgP) && Number.isFinite(medP)) ? `${fmtNum(avgP)} · ${fmtNum(medP)}` : "-";
+            (Number.isFinite(avgP) && Number.isFinite(medP)) ? `${fmtNum(Math.round(avgP))} · ${fmtNum(medP)}` : "-";
 
-        // rates
         const accCnt = rows.filter(r => r[SERVER_KEYS.accYN] === "Y").length;
         const simCnt = rows.filter(r => r[SERVER_KEYS.simpleYN] === "Y").length;
 
@@ -859,10 +899,7 @@
         document.getElementById("mMileage").innerText =
             (Number.isFinite(avgM) && Number.isFinite(medM)) ? `${fmtNum(avgM)} · ${fmtNum(medM)}` : "-";
 
-        // chart scatter plot with individual listings
         renderPriceChart(rows, rm);
-
-        // 새로운 가격 분석 업데이트
         updatePriceAnalysis();
     }
 
@@ -871,135 +908,183 @@
         const ctx = canvas.getContext("2d");
 
         if (!rows || rows.length === 0){
-            if (chart){ chart.destroy(); chart = null; }
+            // ✅ 로딩 중 빈 데이터가 들어오면 차트를 지우지 말고 유지
             return;
         }
 
-        // Prepare data points with car info
-        let dataPoints = [];
-        const allPrices = [];
+        // 가격(만원) 수집
+        let points = [];
+        let prices = [];
 
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const price = toNum(row[SERVER_KEYS.price]);
-            const carNo = row["차량번호"] || `매물${i+1}`;
-            const mileage = toNum(row[SERVER_KEYS.mileage]);
+        for(let i=0;i<rows.length;i++){
+            const r = rows[i];
+            const pMan = normalizePriceToManwon(r[SERVER_KEYS.price]);
+            if(!Number.isFinite(pMan) || pMan <= 0) continue;
 
-            if (Number.isFinite(price) && price > 0) {
-                allPrices.push(price);
-                dataPoints.push({
-                    x: i, // x-axis will be listing index
-                    y: price,
-                    carNo: carNo,
-                    price: price,
-                    mileage: mileage,
-                    rowIndex: i
-                });
+            points.push({
+                idx: i,
+                carNo: r["차량번호"] || `매물${i+1}`,
+                priceManwon: pMan,
+                mileage: toNum(r[SERVER_KEYS.mileage]),
+            });
+            prices.push(pMan);
+        }
+
+        // 이상치 제거
+        if(removeOutliers && prices.length){
+            const { filtered } = filterOutlierPrices(prices);
+            // ✅ 중복가격 대응: Set로 자르면 같은 가격 일부가 날아갈 수 있음.
+            // 간단히 "범위"로 다시 필터링하는게 안전함.
+            const base = filtered.filter(Number.isFinite);
+            if(base.length){
+                const minP = Math.min(...base);
+                const maxP = Math.max(...base);
+                points = points.filter(pt => pt.priceManwon >= minP && pt.priceManwon <= maxP && pt.priceManwon !== 9999 && pt.priceManwon > 0);
+                prices = points.map(pt => pt.priceManwon);
             }
         }
 
-        // Apply outlier filtering if enabled
-        if (removeOutliers && allPrices.length > 0) {
-            const {filtered} = filterOutlierPrices(allPrices);
-            const filteredPriceSet = new Set(filtered);
-            dataPoints = dataPoints.filter(point => filteredPriceSet.has(point.price));
-        }
-
-        if (dataPoints.length === 0) {
+        if(!prices.length){
             if (chart){ chart.destroy(); chart = null; }
             return;
         }
 
-        // Sort by price for better curve visualization
-        dataPoints.sort((a, b) => a.price - b.price);
-        // Reassign x coordinates after sorting
-        dataPoints.forEach((point, index) => {
-            point.x = index;
+        // KDE 계산 (x=가격, y=밀도)
+        const s = std(prices);
+        const bw = Math.max(15, Math.round(0.2 * s)); // 최소 15만원
+        const kde = calculateKDE_Manwon(prices, bw);
+
+        const maxDensity = Math.max(...kde.map(p=>p.y), 1e-6);
+
+        // 특정 가격 x에서 밀도 y 가져오기 (선형보간)
+        function densityAtX(kdePoints, x){
+            // kdePoints는 x 오름차순
+            let lo = 0, hi = kdePoints.length - 1;
+            while (lo <= hi){
+                const mid = (lo + hi) >> 1;
+                if (kdePoints[mid].x < x) lo = mid + 1;
+                else hi = mid - 1;
+            }
+            const i = Math.max(1, Math.min(kdePoints.length - 1, lo));
+            const a = kdePoints[i-1], b = kdePoints[i];
+            const t = (x - a.x) / (b.x - a.x || 1);
+            return a.y + (b.y - a.y) * t;
+        }
+
+        // scatter: x=가격, y=밀도 + 지터(겹침 완화)
+        const scatter = points.map((pt) => {
+            const d = densityAtX(kde, pt.priceManwon);
+            const jitter = (Math.random() - 0.5) * maxDensity * 0.35; // 폭 조절
+            return {
+                x: pt.priceManwon,         // ✅ 왼쪽=저가, 오른쪽=고가
+                y: Math.max(0, d + jitter),
+                carNo: pt.carNo,
+                priceManwon: pt.priceManwon,
+                mileage: pt.mileage,
+            };
         });
+
+        // 중앙값 라인: x=중앙값 가격 세로선
+        const sorted = [...prices].sort((a,b)=>a-b);
+        const med = sorted[Math.floor(sorted.length/2)];
+        const yMax = Math.max(maxDensity * 1.1, ...scatter.map(p=>p.y)) || (maxDensity * 1.1);
 
         if (chart) chart.destroy();
         chart = new Chart(ctx, {
-            type: "line",
+            type: "scatter",
             data: {
-                datasets: [{
-                    label: "매물 가격",
-                    data: dataPoints,
-                    borderColor: "rgba(91,140,255,0.8)",
-                    backgroundColor: "rgba(91,140,255,0.6)",
-                    pointBackgroundColor: "rgba(91,140,255,0.9)",
-                    pointBorderColor: "rgba(255,255,255,0.8)",
-                    pointBorderWidth: 2,
-                    pointRadius: 6,
-                    pointHoverRadius: 8,
-                    fill: false,
-                    tension: 0.4,
-                    showLine: true
-                }]
+                datasets: [
+                    {
+                        label: "가격 분포",
+                        data: kde,
+                        type: "line",
+                        borderColor: "rgba(91,140,255,0.85)",
+                        backgroundColor: "rgba(91,140,255,0.12)",
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        order: 2
+                    },
+                    {
+                        label: "매물",
+                        data: scatter,
+                        backgroundColor: "rgba(91,140,255,0.70)",
+                        borderColor: "rgba(255,255,255,0.85)",
+                        borderWidth: 1,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        order: 1
+                    },
+                    {
+                        label: "중앙값",
+                        data: [{x:med, y:0}, {x:med, y:yMax}],
+                        type: "line",
+                        borderColor: "rgba(34,197,94,0.85)",
+                        borderWidth: 2,
+                        borderDash: [6, 6],
+                        pointRadius: 0,
+                        order: 3
+                    }
+                ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                interaction: {
-                    intersect: false,
-                    mode: 'point'
-                },
+                interaction: { intersect: false, mode: "nearest" },
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        enabled: true,
+                        filter: (item) => item.datasetIndex === 1,
                         callbacks: {
-                            title: function(context) {
-                                const point = context[0].raw;
-                                return `차량번호: ${point.carNo}`;
+                            title: (items) => {
+                                const raw = items?.[0]?.raw;
+                                if (!raw || !raw.carNo) return "";   // ✅ 가드
+                                return `차량번호: ${raw.carNo}`;
                             },
-                            label: function(context) {
-                                const point = context.raw;
-                                const lines = [`가격: ${fmtNum(point.price)}원`];
-                                if (Number.isFinite(point.mileage)) {
-                                    lines.push(`주행거리: ${fmtNum(point.mileage)}km`);
-                                }
+                            label: (item) => {
+                                const raw = item?.raw;
+                                if (!raw) return "";                 // ✅ 가드
+                                const p = raw.priceManwon ?? raw.x;  // 혹시 모를 fallback
+                                const lines = [`가격: ${fmtNum(p)}만원`];
+                                if (Number.isFinite(raw.mileage)) lines.push(`주행거리: ${fmtNum(raw.mileage)}km`);
                                 return lines;
                             }
                         }
                     }
                 },
                 scales: {
-                    x: { 
-                        display: false // Hide x-axis as it's just index
-                    },
-                    y: { 
-                        ticks: { 
+                    x: {
+                        ticks: {
                             color: "#9aa7bd",
-                            callback: function(value) {
-                                return fmtNum(value) + '원';
-                            }
-                        }, 
+                            callback: (v) => `${fmtNum(v)}`
+                        },
                         grid: { color: "rgba(255,255,255,.06)" },
-                        title: {
-                            display: true,
-                            text: '가격 (원)',
-                            color: "#9aa7bd"
-                        }
+                        title: { display: true, text: "가격 (만원)", color: "#9aa7bd" }
+                    },
+                    y: {
+                        display: false, // ✅ 밀도축은 숨김(원하면 true로)
+                        min: 0,
+                        max: yMax
                     }
                 },
                 onClick: function(event, elements) {
-                    if (elements.length > 0) {
-                        const element = elements[0];
-                        const dataPoint = dataPoints[element.index];
+                    if (!elements?.length) return;
+                    const el = elements[0];
+                    if (el.datasetIndex !== 1) return;
 
-                        // Find and select the corresponding row in the table
-                        const tableRows = table.getRows();
-                        for (let tableRow of tableRows) {
-                            const rowData = tableRow.getData();
-                            if (rowData["차량번호"] === dataPoint.carNo) {
-                                // Deselect all rows first
-                                table.deselectRow();
-                                // Select the matching row
-                                tableRow.select();
-                                // Scroll to the row
-                                tableRow.scrollTo();
-                                break;
-                            }
+                    const clicked = scatter[el.index];
+                    const carNo = clicked?.carNo;
+                    if (!carNo || !table) return;
+
+                    const tableRows = table.getRows();
+                    for (const tr of tableRows) {
+                        const d = tr.getData();
+                        if (d["차량번호"] === carNo) {
+                            table.deselectRow();
+                            tr.select();
+                            tr.scrollTo();
+                            break;
                         }
                     }
                 }
@@ -1007,35 +1092,28 @@
         });
     }
 
-    // ======================
-    // Load + Actions
-    // ======================
-    let __loading = false;
-
-    // 가격 분석 데이터 로드
+    /* =========================================================
+       Price Analysis (API)
+    ========================================================= */
     async function loadPriceAnalysis() {
         try {
             const keyword = document.getElementById("keyword").value.trim();
             const params = new URLSearchParams();
             if (keyword) params.set("keyword", keyword);
-            params.set("sample", "5000"); // 샘플 크기 제한
+            params.set("sample", "5000");
 
             const response = await fetch(`/encar/api/combine/price-analysis?${params.toString()}`);
             const data = await response.json();
+            if (data.ok) return data;
 
-            if (data.ok) {
-                return data;
-            } else {
-                console.error("Price analysis API error:", data.error);
-                return null;
-            }
+            console.error("Price analysis API error:", data.error);
+            return null;
         } catch (e) {
             console.error("Failed to load price analysis:", e);
             return null;
         }
     }
 
-    // 가격 분석 테이블 업데이트
     async function updatePriceAnalysis() {
         const container = document.getElementById("priceAnalysisTable");
         container.innerHTML = '<div style="color: var(--muted); text-align: center; padding: 20px;">데이터를 불러오는 중...</div>';
@@ -1046,34 +1124,19 @@
             return;
         }
 
-        // 테이블 생성
         let html = '<table class="priceAnalysisTable">';
-
-        // 헤더
         html += '<thead><tr><th>연식</th>';
-        for (const range of data.mileage_ranges) {
-            html += `<th>${range}</th>`;
-        }
+        for (const range of data.mileage_ranges) html += `<th>${range}</th>`;
         html += '</tr></thead>';
 
-        // 데이터 행
         html += '<tbody>';
         for (const yearData of data.analysis) {
-            if (yearData.mileage_ranges.some(r => r.count > 0)) { // 데이터가 있는 연식만 표시
+            if (yearData.mileage_ranges?.some(r => r.count > 0)) {
                 html += `<tr><td class="year-col">${yearData.year}</td>`;
-
                 for (const rangeData of yearData.mileage_ranges) {
                     if (rangeData.count > 0) {
-                        // 가격이 1만원 이상이면 만원 단위로, 그 이하면 천원 단위로 표시
-                        let displayPrice, unit;
-                        if (rangeData.avg_price >= 10000) {
-                            displayPrice = rangeData.avg_price;
-                            unit = "";
-                        } else {
-                            displayPrice = rangeData.avg_price;
-                            unit = "";
-                        }
-                        html += `<td class="price-cell" title="평균: ${fmtNum(rangeData.avg_price)}\n최소: ${fmtNum(rangeData.min_price)}\n최대: ${fmtNum(rangeData.max_price)}\n매물수: ${rangeData.count}">${displayPrice}${unit}</td>`;
+                        const displayPrice = fmtNum(rangeData.avg_price);
+                        html += `<td class="price-cell" title="평균: ${fmtNum(rangeData.avg_price)}\n최소: ${fmtNum(rangeData.min_price)}\n최대: ${fmtNum(rangeData.max_price)}\n매물수: ${rangeData.count}">${displayPrice}</td>`;
                     } else {
                         html += '<td class="no-data">-</td>';
                     }
@@ -1083,13 +1146,17 @@
         }
         html += '</tbody></table>';
 
-        // 범례 추가
         html += '<div style="margin-top: 8px; font-size: 10px; color: var(--muted); text-align: center;">';
         html += '단위: 만원 (평균가격) | 셀에 마우스를 올리면 상세정보 표시';
         html += '</div>';
 
         container.innerHTML = html;
     }
+
+    /* =========================================================
+       Load + Actions
+    ========================================================= */
+    let __loading = false;
 
     async function load(resetPage=true){
         if (__loading) return;
@@ -1100,17 +1167,14 @@
 
             const limit = Number(document.getElementById("limit").value || 100);
 
-            // 1) page size가 바뀐 경우에만 setPageSize (이게 이미 ajax를 부를 수 있음)
+            // page size 변경
             if (table.getPageSize() !== limit){
                 table.setPageSize(limit);
             }
 
-            // 2) resetPage면 1페이지로 이동 (이것도 ajax를 부를 수 있음)
             if (resetPage){
-                table.setPage(1);
-                // setPage가 이미 데이터를 불러오면 여기서 끝
+                table.setPage(1); // ajax trigger
             } else {
-                // 3) 같은 페이지에서 "새로고침"만 하고 싶을 때만 replaceData
                 await table.replaceData();
             }
 
@@ -1124,17 +1188,14 @@
         }
     }
 
-    document.getElementById("btnLoad").addEventListener("click", ()=>load(true));   // 새검색: 1페이지로
-    document.getElementById("btnRefresh").addEventListener("click", ()=>load(false)); // 새로고침: 현재페이지 유지
+    document.getElementById("btnLoad").addEventListener("click", ()=>load(true));
+    document.getElementById("btnRefresh").addEventListener("click", ()=>load(false));
     document.getElementById("rmOutlier").addEventListener("change", ()=> {
-        // 현재 테이블 데이터 기준으로만 즉시 반영
         updateSummary(table.getData() || [], { total: total });
     });
-
     document.getElementById("keyword").addEventListener("keydown", (e)=>{
         if (e.key === "Enter") load(true);
     });
-
     document.getElementById("btnExcel").addEventListener("click", ()=>{
         const keyword = document.getElementById("keyword").value.trim();
         const limit = document.getElementById("limit").value;
@@ -1143,12 +1204,11 @@
         if(keyword) qs.set("keyword", keyword);
         window.location.href = `/encar/api/combine/export.xlsx?${qs.toString()}`;
     });
-
     document.getElementById("btnReset").addEventListener("click", ()=>{
         document.getElementById("keyword").value = "";
         document.getElementById("limit").value = "100";
         document.getElementById("rmOutlier").checked = true;
-        offset = 0;
+        // ❌ offset 같은 미정의 변수 쓰지 말 것
         load(true);
     });
 
