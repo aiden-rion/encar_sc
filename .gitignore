@@ -14,3 +14,7 @@ pgdata/
 encar_dump.db
 
 encar_dump.db
+
+# local db dumps
+*.db
+encar_dump.db
