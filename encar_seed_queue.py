@@ -17,7 +17,7 @@ MAKERS: Dict[str, str] = {
     "kgm": "KG모빌리티(쌍용)",
 }
 
-SORT_FIELD = "ModifiedDate"
+SORT_FIELD = "PriceAsc"
 LIMIT = 500
 
 SLEEP_BETWEEN_CALLS_SEC = (0.2, 0.55)
