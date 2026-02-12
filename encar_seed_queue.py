@@ -257,6 +257,8 @@ class EncarClient:
     def __init__(self):
         self.s = requests.Session()
         self.s.headers.update(DEFAULT_HEADERS)
+        self.s.trust_env = False   # ✅ 환경변수 프록시/인증 무시
+
 
     def get_json(self, params: Dict[str, str]) -> Dict[str, Any]:
         last_err = None
